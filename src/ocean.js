@@ -1,22 +1,197 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { reef } from './reef.js';
+
+const clamp = THREE.MathUtils.clamp;
+const smooth = t => t * t * (3 - 2 * t);
+const mix = THREE.MathUtils.lerp;
+
 export function createOcean(canvas, onReady) {
- const renderer = new THREE.WebGLRenderer({canvas,antialias:innerWidth>700,alpha:false,powerPreference:'low-power'});
- renderer.setPixelRatio(Math.min(devicePixelRatio,innerWidth<700?1.25:1.7));renderer.setSize(innerWidth,innerHeight);renderer.setClearColor(0x063747);
- const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x073444,.023);
- const camera=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.1,130);camera.position.set(0,2,23);
- scene.add(new THREE.HemisphereLight(0xbceeff,0x031922,2.5));const sun=new THREE.DirectionalLight(0xd5fff1,4);sun.position.set(-8,18,8);scene.add(sun);
- const water=new THREE.Mesh(new THREE.PlaneGeometry(180,130,80,60),new THREE.ShaderMaterial({side:THREE.DoubleSide,transparent:true,uniforms:{time:{value:0}},vertexShader:`uniform float time;varying vec2 uvv;void main(){uvv=uv;vec3 p=position;p.z+=sin(p.x*.35+time*.3)*.6+sin(p.y*.6+time*.4)*.3;gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}`,fragmentShader:`varying vec2 uvv;uniform float time;void main(){float a=sin(uvv.x*130.+sin(uvv.y*65.+time)*3.);float b=sin(uvv.y*120.+sin(uvv.x*80.-time)*3.);float c=pow(max(0.,a*b),6.);gl_FragColor=vec4(vec3(.12,.56,.6)+c*.3,.42);}`}));water.rotation.x=Math.PI/2;water.position.y=12;scene.add(water);
- const raymat=new THREE.MeshBasicMaterial({color:0x88e7dd,transparent:true,opacity:.035,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});for(let i=0;i<9;i++){const ray=new THREE.Mesh(new THREE.PlaneGeometry(1+i*.15,45),raymat);ray.position.set(-14+i*4,-2,-7-i%3*8);ray.rotation.z=-.32;scene.add(ray);}
- const mat=new THREE.MeshStandardMaterial({color:0x688f9c,roughness:.42,metalness:.12,side:THREE.DoubleSide});
- // Continuous parametric manta surface, with tapered wing tips and a thick central body.
- function manta(scale,x,y,z){const group=new THREE.Group(),vertices=[],indices=[];const nx=80,ny=28;for(let j=0;j<=ny;j++){let v=j/ny;for(let i=0;i<=nx;i++){let u=i/nx*2-1;let wing=Math.pow(1-Math.abs(u),.6);vertices.push(u*5,(Math.sin(v*Math.PI)*.35*(1-Math.abs(u)))-Math.pow(Math.abs(u),1.6)*.12,(v-.45)*(1.1+wing*3)+Math.abs(u)*1.25);}}for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){let a=j*(nx+1)+i;indices.push(a,a+1,a+nx+1,a+1,a+nx+2,a+nx+1);}const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geo.setIndex(indices);geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,mat);group.add(mesh);const tail=new THREE.CatmullRomCurve3([new THREE.Vector3(0,0,2),new THREE.Vector3(0,-.1,4),new THREE.Vector3(.3,-.2,6)]);group.add(new THREE.Mesh(new THREE.TubeGeometry(tail,24,.045,6,false),mat));for(const side of [-1,1]){const horn=new THREE.CatmullRomCurve3([new THREE.Vector3(side*.45,0,-1.3),new THREE.Vector3(side*.7,.1,-2),new THREE.Vector3(side*.5,.25,-2.2)]);group.add(new THREE.Mesh(new THREE.TubeGeometry(horn,12,.13,8,false),mat));const eye=new THREE.Mesh(new THREE.SphereGeometry(.10,12,8),new THREE.MeshStandardMaterial({color:0x031018,roughness:.1}));eye.position.set(side*.65,.16,-1);group.add(eye);}group.position.set(x,y,z);group.scale.setScalar(scale);group.rotation.set(.22,.35,-.2);scene.add(group);return {group,mesh,base:vertices.slice(),phase:Math.random()*6};}
- const mantas=[manta(1.25,5,1,0),manta(.46,-7,4,-20),manta(.65,12,-19,-13)];
- const positions=new Float32Array(1500*3);for(let i=0;i<positions.length;i+=3){positions[i]=(Math.random()-.5)*85;positions[i+1]=12-Math.random()*95;positions[i+2]=(Math.random()-.5)*75;}const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(positions,3));const particles=new THREE.Points(pg,new THREE.PointsMaterial({color:0xb0e8dc,size:.045,transparent:true,opacity:.55}));scene.add(particles);
- const jellies=[];for(let k=0;k<13;k++){const g=new THREE.Group();const jm=new THREE.MeshStandardMaterial({color:0x81ccd6,emissive:0x258eaa,emissiveIntensity:.8,transparent:true,opacity:.6,side:THREE.DoubleSide});const bell=new THREE.Mesh(new THREE.SphereGeometry(.7,28,20,0,Math.PI*2,0,Math.PI*.58),jm);g.add(bell);for(let j=0;j<9;j++){const a=j/9*Math.PI*2,curve=new THREE.CatmullRomCurve3(Array.from({length:8},(_,q)=>new THREE.Vector3(Math.cos(a)*(.4+q*.025)+Math.sin(q)*.1,-q*.32,Math.sin(a)*.4)));g.add(new THREE.Mesh(new THREE.TubeGeometry(curve,25,.014,4,false),jm));}g.position.set((Math.random()-.35)*27,-40-Math.random()*20,Math.random()*16-12);g.scale.setScalar(.5+Math.random());scene.add(g);jellies.push(g);}
- const animateReef=reef(scene); let paused=matchMedia('(prefers-reduced-motion: reduce)').matches,progress=0,time=0,last=0,raf=0,lost=false;
- function render(now){raf=requestAnimationFrame(render);if(document.hidden||lost)return;const end=document.querySelector('#discover').offsetTop;if(scrollY>end+innerHeight)return;const dt=Math.min((now-last)/1000,.04)||0;last=now;if(!paused)time+=dt;const target=Math.min(scrollY/Math.max(1,end-innerHeight),1);progress=target;raymat.opacity=.035*(1-progress);camera.position.y=2-progress*54;camera.position.x=Math.sin(progress*4)*2;camera.lookAt(2,camera.position.y-1,-8);scene.fog.color.setRGB(.025*(1-progress),.18*(1-progress)+.015,.23*(1-progress)+.035);renderer.setClearColor(scene.fog.color);sun.intensity=4*(1-progress)+.2;water.material.uniforms.time.value=time;for(const m of mantas){const p=m.mesh.geometry.attributes.position;for(let i=0;i<p.count;i++){const x=m.base[i*3];p.setY(i,m.base[i*3+1]+Math.sin(time*1.15+Math.abs(x)*.5+m.phase)*Math.pow(Math.abs(x)/5,1.6)*1.1);}p.needsUpdate=true;m.mesh.geometry.computeVertexNormals();m.group.rotation.y=.35+Math.sin(time*.18+m.phase)*.12;}jellies.forEach((g,i)=>{g.rotation.y=time*.07;g.scale.y=1+Math.sin(time*1.5+i)*.07;});animateReef(time);renderer.render(scene,camera);}
- const resize=()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);};addEventListener('resize',resize);canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();lost=true;onReady('Đồ họa tạm gián đoạn. Nội dung vẫn có thể khám phá.');});canvas.addEventListener('webglcontextrestored',()=>{lost=false;onReady('');});raf=requestAnimationFrame(render);onReady('');return {setPaused(value){paused=value;},dispose(){cancelAnimationFrame(raf);removeEventListener('resize',resize);renderer.dispose();}};
+  const mobile = matchMedia('(max-width: 700px)').matches;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.25 : 1.6));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.35;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b4957);
+  scene.fog = new THREE.Fog(0x0b4957, 12, 90);
+  const deepColor = new THREE.Color(0x001d2d);
+  const shallowColor = scene.background.clone();
+  const discover = document.querySelector('#discover');
+  const camera = new THREE.PerspectiveCamera(mobile ? 55 : 48, innerWidth / innerHeight, 0.1, 160);
+  const cameraTarget = new THREE.Vector3();
+  const clock = new THREE.Clock();
+  let elapsed = 0, lastFrame = 0, frame = 0, paused = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let lost = false, disposed = false, dirty = true, previousScroll = -1;
+  const mixers = [];
+  const swimmers = [];
+
+  scene.add(new THREE.HemisphereLight(0x85d4de, 0x001622, 2.3));
+  const sun = new THREE.DirectionalLight(0xe6fff0, 3.8);
+  sun.position.set(-9, 19, 7);
+  scene.add(sun);
+  const sideLight = new THREE.PointLight(0x80e8db, 75, 32, 2);
+  sideLight.position.set(7, -2, 7);
+  scene.add(sideLight);
+
+  // A transparent, moving surface is seen from below, not a static background plate.
+  const surface = new THREE.Mesh(new THREE.PlaneGeometry(150, 150, 32, 32), new THREE.ShaderMaterial({
+    transparent: true, side: THREE.DoubleSide, depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uFade: { value: 1 } },
+    vertexShader: `uniform float uTime; varying vec2 vUv; void main(){vUv=uv; vec3 p=position; p.z+=sin(p.x*.28+uTime*.35)*.33+sin(p.y*.46-uTime*.26)*.23; gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}`,
+    fragmentShader: `uniform float uTime; uniform float uFade; varying vec2 vUv; void main(){vec2 p=vUv*42.; float wave=sin(p.x*2.1+sin(p.y*.95+uTime*.5)*2.2+uTime*.45)*sin(p.y*1.4+sin(p.x*.7-uTime*.4)*1.8); float lace=pow(max(wave,0.),8.); vec3 c=mix(vec3(.045,.25,.30),vec3(.42,.88,.84),lace*.72); gl_FragColor=vec4(c,(.68+lace*.16)*uFade);}`
+  }));
+  surface.rotation.x = -Math.PI / 2;
+  surface.position.y = 9;
+  scene.add(surface);
+
+  // Shaft geometry provides parallax while the seabed shader carries the caustics.
+  const shaftMaterial = new THREE.MeshBasicMaterial({ color: 0x9bede0, transparent: true, opacity: .015, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  const shafts = new THREE.Group();
+  for (let i = 0; i < 7; i++) {
+    const geometry = new THREE.CylinderGeometry(.26 + i * .04, 2.5 + (i % 3), 53, 4, 1, true);
+    const shaft = new THREE.Mesh(geometry, shaftMaterial);
+    shaft.position.set(-12 + i * 5.5, -15, -14 - (i % 4) * 5);
+    shaft.rotation.z = -.2 + (i % 4) * .06;
+    shafts.add(shaft);
+  }
+  scene.add(shafts);
+
+  const floorUniforms = { uTime: { value: 0 }, uLight: { value: 1 } };
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(85, 90, 48, 48), new THREE.ShaderMaterial({
+    uniforms: floorUniforms, side: THREE.DoubleSide,
+    vertexShader: `varying vec3 vP; void main(){vP=position; vec3 p=position; p.z+=sin(p.x*.17)*.6+cos(p.y*.22)*.5; gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);}`,
+    fragmentShader: `uniform float uTime; uniform float uLight; varying vec3 vP; void main(){vec2 p=vP.xy*.75; float a=sin(p.x*1.8+sin(p.y*.76+uTime*.34)*1.5); float b=sin(p.y*1.6+sin(p.x*.82-uTime*.27)*1.5); float caustic=pow(max(0.,a*b),7.); vec3 sand=mix(vec3(.018,.13,.16),vec3(.10,.31,.31),clamp((vP.x+35.)/70.,0.,1.)); gl_FragColor=vec4(sand+caustic*vec3(.055,.17,.15)*uLight,1.);}`
+  }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(5, -20.5, -14);
+  scene.add(floor);
+  const animateReef = reef(scene);
+
+  const particleCount = mobile ? 420 : 950;
+  const dots = new Float32Array(particleCount * 3);
+  for (let i = 0; i < dots.length; i += 3) {
+    dots[i] = (Math.random() - .5) * 92;
+    dots[i + 1] = 10 - Math.random() * 76;
+    dots[i + 2] = (Math.random() - .5) * 85;
+  }
+  const dotGeometry = new THREE.BufferGeometry();
+  dotGeometry.setAttribute('position', new THREE.BufferAttribute(dots, 3));
+  const plankton = new THREE.Points(dotGeometry, new THREE.PointsMaterial({ color: 0xc9eadb, size: .055, transparent: true, opacity: .45, depthWrite: false }));
+  scene.add(plankton);
+
+  // Keep the existing deep-water jellyfish, sharing geometry and material.
+  const jellyMaterial = new THREE.MeshStandardMaterial({ color: 0x79c5d4, emissive: 0x217e9b, emissiveIntensity: .7, transparent: true, opacity: .57, side: THREE.DoubleSide });
+  const bellGeometry = new THREE.SphereGeometry(.72, 20, 12, 0, Math.PI * 2, 0, Math.PI * .55);
+  const jellyfish = [];
+  for (let k = 0; k < (mobile ? 7 : 13); k++) {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(bellGeometry, jellyMaterial));
+    for (let j = 0; j < 7; j++) {
+      const a = j / 7 * Math.PI * 2;
+      const points = Array.from({ length: 7 }, (_, q) => new THREE.Vector3(Math.cos(a) * .42 + Math.sin(q * 1.5) * .07, -q * .32, Math.sin(a) * .42));
+      g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, .012, 3), jellyMaterial));
+    }
+    g.position.set((Math.random() - .4) * 25, -43 - Math.random() * 14, Math.random() * 18 - 13);
+    g.scale.setScalar(.5 + Math.random() * .65);
+    scene.add(g);
+    jellyfish.push(g);
+  }
+
+  const loader = new GLTFLoader();
+  loader.load(`${import.meta.env.BASE_URL}models/manta-ray.glb`, gltf => {
+    if (disposed) return;
+    const hero = gltf.scene;
+    hero.position.set(mobile ? 1.5 : 6.9, mobile ? -5.2 : -.7, 2);
+    hero.rotation.set(.04, -.28, -.12);
+    hero.scale.setScalar(mobile ? .62 : 1.25);
+    hero.traverse(object => { if (object.isMesh) { object.frustumCulled = false; object.castShadow = false; } });
+    scene.add(hero);
+    swimmers.push({ group: hero, origin: hero.position.clone(), phase: 0 });
+    if (gltf.animations.length) {
+      const mixer = new THREE.AnimationMixer(hero);
+      mixer.clipAction(gltf.animations[0]).setEffectiveTimeScale(.82).play();
+      mixers.push(mixer);
+    }
+    if (!mobile) {
+      const distant = cloneSkeleton(gltf.scene);
+      distant.position.set(-8, -16, -26);
+      distant.rotation.set(.08, .5, -.08);
+      distant.scale.setScalar(.32);
+      distant.traverse(object => { if (object.isMesh) object.frustumCulled = false; });
+      scene.add(distant);
+      swimmers.push({ group: distant, origin: distant.position.clone(), phase: 1.6 });
+      if (gltf.animations.length) {
+        const mixer = new THREE.AnimationMixer(distant);
+        mixer.clipAction(gltf.animations[0]).setEffectiveTimeScale(.95).play();
+        mixers.push(mixer);
+      }
+    }
+    onReady(''); dirty = true;
+  }, undefined, error => { console.error('Manta GLB failed to load', error); onReady('Không tải được model cá đuối. Nội dung khám phá vẫn hoạt động.'); });
+
+  function render(now) {
+    frame = requestAnimationFrame(render);
+    if (disposed || document.hidden || lost) return;
+    const discoverTop = discover.offsetTop;
+    const isNearScene = scrollY < discoverTop + innerHeight * .35;
+    if (!isNearScene) return;
+    const moved = Math.abs(scrollY - previousScroll) > .5;
+    if (!dirty && !moved && (paused || now - lastFrame < (mobile ? 33 : 22))) return;
+    const depth = clamp(scrollY / Math.max(1, discoverTop - innerHeight), 0, 1);
+    const dt = Math.min(clock.getDelta(), .05);
+    lastFrame = now; previousScroll = scrollY; dirty = false;
+    if (!paused) { elapsed += dt; mixers.forEach(m => m.update(dt)); }
+    const surfaceDepth = smooth(clamp(depth / .50, 0, 1));
+    const deepDepth = smooth(clamp((depth - .36) / .64, 0, 1));
+    camera.position.set(mix(0, 2.5, surfaceDepth) + Math.sin(depth * Math.PI) * 1.3, mix(0, -52, depth), mix(19, 14, surfaceDepth));
+    cameraTarget.set(mix(2.6, 1, surfaceDepth), camera.position.y - mix(-.4, 1.5, depth), -9 - depth * 2);
+    camera.lookAt(cameraTarget);
+    scene.fog.color.copy(shallowColor).lerp(deepColor, deepDepth);
+    scene.background.copy(scene.fog.color);
+    scene.fog.near = mix(12, 7, deepDepth);
+    scene.fog.far = mix(90, 43, deepDepth);
+    sun.intensity = mix(3.8, .18, depth);
+    sideLight.intensity = mix(75, 4, depth);
+    shaftMaterial.opacity = .015 * (1 - surfaceDepth * .9);
+    surface.material.uniforms.uFade.value = 1 - surfaceDepth;
+    surface.material.uniforms.uTime.value = elapsed;
+    floor.visible = depth > .12 && depth < .66;
+    floorUniforms.uTime.value = elapsed;
+    floorUniforms.uLight.value = 1 - deepDepth;
+    if (!paused) {
+      swimmers.forEach(({ group, origin, phase }, i) => {
+        group.position.x = origin.x + Math.sin(elapsed * .19 + phase) * (i ? 1 : 1.2);
+        group.position.y = origin.y + Math.sin(elapsed * .65 + phase) * .18;
+        group.rotation.y += Math.sin(elapsed * .22 + phase) * .0003;
+      });
+      jellyfish.forEach((g, i) => { g.rotation.y = elapsed * .035; g.scale.y = 1 + Math.sin(elapsed * 1.2 + i) * .06; });
+
+    }
+    animateReef(elapsed, depth > .10 && depth < .66);
+    renderer.render(scene, camera);
+  }
+  function resize() {
+    camera.aspect = innerWidth / innerHeight;
+    camera.fov = innerWidth < 700 ? 55 : 48;
+    camera.updateProjectionMatrix();
+    renderer.setPixelRatio(Math.min(devicePixelRatio, innerWidth < 700 ? 1.25 : 1.6));
+    renderer.setSize(innerWidth, innerHeight);
+    dirty = true;
+  }
+  const markDirty = () => { dirty = true; };
+  addEventListener('resize', resize);
+  addEventListener('scroll', markDirty, { passive: true });
+  canvas.addEventListener('webglcontextlost', onContextLost);
+  canvas.addEventListener('webglcontextrestored', onContextRestored);
+  function onContextLost(event) { event.preventDefault(); lost = true; onReady('Đồ họa tạm gián đoạn. Nội dung vẫn có thể khám phá.'); }
+  function onContextRestored() { lost = false; dirty = true; onReady(''); }
+  frame = requestAnimationFrame(render);
+  return {
+    setPaused(value) { paused = value; dirty = true; },
+    dispose() { disposed = true; cancelAnimationFrame(frame); removeEventListener('resize', resize); removeEventListener('scroll', markDirty); renderer.dispose(); }
+  };
 }
-
-
