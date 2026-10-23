@@ -1,27 +1,53 @@
-# Tự động giao việc cho Codex qua GitHub
+# WEB_BIEN_S2 — ChatGPT → GitHub → Codex tự động
 
-Repository: https://github.com/tranngochuyc-cyber/web-bien-s2
+## Luồng chính: Codex CLI trong WSL (dùng tài khoản Codex đã đăng nhập)
 
-## Cách hoạt động
+1. ChatGPT kiểm tra website và tạo GitHub Issue có tiêu đề bắt đầu bằng `[Codex]`, đứng tên chủ repository `tranngochuyc-cyber`.
+2. Script `scripts/codex_issue_worker.py` trên WSL đọc GitHub Issues mỗi 60 giây, **chỉ nhận Issue của chủ repository**.
+3. Worker tạo một bản clone riêng trong `~/.local/share/web-bien-s2-codex/repo`, không chiếm chuột/bàn phím và không làm thay đổi workspace bạn đang mở.
+4. Worker dùng `codex exec --full-auto` với phiên Codex CLI đã đăng nhập trong WSL, giữ lại thay đổi sau lỗi và thử tiếp khi giới hạn sử dụng được khôi phục. Không hứa đoán chính xác giờ reset quota: khi gặp thông báo giới hạn, worker tạm lùi 15 phút rồi kiểm tra lại; lỗi khác thử lại sau 3 phút.
+5. Sau khi Codex kết thúc, worker chạy `npm ci`, `npm run build` và `npm test --if-present`. Nếu build/test không đạt, nó quay lại Codex để sửa tiếp.
+6. Khi thành công, worker đẩy code lên nhánh `codex/issue-N-wsl`, tạo Pull Request và bình luận liên kết vào Issue. **Không tự sửa trực tiếp nhánh main** để tránh làm hỏng website đang chạy.
 
-1. ChatGPT kiểm tra tiến độ và tạo GitHub Issue do tài khoản chủ repository đứng tên, có tiêu đề bắt đầu bằng `[Codex]`.
-2. GitHub Actions chạy workflow `.github/workflows/codex-issues.yml` trên máy chủ Linux tách biệt, không dùng chuột/màn hình hoặc Codex CLI trên máy Windows.
-3. Workflow gọi `openai/codex-action` để thực hiện nội dung Issue, chạy `npm ci`, `npm run build` và `npm test --if-present`.
-4. Nếu có thay đổi, workflow tạo nhánh `codex/issue-N-RUN_ID` và mở Pull Request; mã nguồn `main` và website đang chạy không bị sửa trước khi PR được merge.
-5. Workflow để lại bình luận trong Issue khi hoàn thành. Theo dõi thông báo, PR và Actions trên GitHub.
+## Thiết lập một lần trên Ubuntu/WSL
 
-## Cần thực hiện một lần trước khi có thể chạy
+Dùng terminal WSL, không dùng Windows PowerShell cho các lệnh dưới đây.
 
-1. Tạo OpenAI API key tại https://platform.openai.com/api-keys với billing API được cấu hình phù hợp. **OpenAI API là hạn mức/chi phí riêng, không dùng token/quota của gói ChatGPT hoặc Codex desktop.**
-2. Vào https://github.com/tranngochuyc-cyber/web-bien-s2/settings/secrets/actions > **New repository secret**, tên chính xác `CODEX_OPENAI_API_KEY`; dán key vào ô *Secret* và lưu. Không ghi key vào source code, Issue hoặc tin nhắn.
-3. Vào https://github.com/tranngochuyc-cyber/web-bien-s2/settings/actions > **Workflow permissions**: bật **Read and write permissions** và **Allow GitHub Actions to create and approve pull requests** nếu các tùy chọn này xuất hiện và chưa được bật.
-4. Để chạy nhiệm vụ Issue #1 hiện có, mở https://github.com/tranngochuyc-cyber/web-bien-s2/actions/workflows/codex-issues.yml > **Run workflow**, nhập số `1`. Những Issue mới có tiêu đề `[Codex]` do chủ repository tạo sẽ tự kích hoạt (không cần dán prompt trong Codex nữa).
+**Điều kiện:** WSL có `git`, `gh` (GitHub CLI), `codex` (Codex CLI), `node/npm`, `python3`. `gh auth login` và `codex login` phải thành công trong **chính distro WSL** này.
 
-## Giới hạn và bảo vệ tiến độ
+```bash
+gh auth login
+codex login
+gh repo clone tranngochuyc-cyber/web-bien-s2 ~/web-bien-s2-bridge
+cd ~/web-bien-s2-bridge
+bash scripts/setup_codex_worker.sh
+```
 
-- Workflow **không** điều khiển Codex CLI / Antigravity trong WSL của người dùng. Nó dùng Codex độc lập trên GitHub-hosted runner. Kết nối WSL là một hướng triển khai riêng và không nên nối self-hosted runner vào repository công khai.
-- Chỉ Issue do chủ repository tạo, có tiêu đề `[Codex]`, mới được tự động thực thi. Job `workflow_dispatch` cũng bị giới hạn cho chủ repository.
-- Codex được cấp quyền sửa trong workspace chạy tạm thời, không được quyền tự chỉnh workflow GitHub; thay đổi workflow sẽ bị từ chối khi tạo nhánh.
-- Mọi thay đổi được đưa vào PR, không tự đẩy trực tiếp lên `main`. Đây là rào chắn để bảo toàn code và tránh việc build pass nhưng giao diện bị hỏng.
-- Job có thể thất bại do API quota/billing, giới hạn GitHub Actions, thiếu quyền push/PR, mạng hoặc lỗi build. Không có cơ chế tự đợi đến thời điểm quota ChatGPT được làm mới rồi tiếp tục.
-- Không cung cấp mô hình 3D riêng và không tự cài Blender. Codex sử dụng tài nguyên có trong repo và những dependency đã được cài.
+Nếu đã có `~/web-bien-s2-bridge`, không clone lại: chạy `cd ~/web-bien-s2-bridge && git pull --ff-only && bash scripts/setup_codex_worker.sh` (chỉ khi working tree sạch).
+
+Script kiểm tra đăng nhập và tạo systemd user service nếu WSL đang chạy systemd; nếu không, dùng `nohup` tạm thời. Để dịch vụ tự chạy sau khi Windows/WSL khởi động lại, cấu hình WSL systemd + user linger hoặc lệnh khởi động WSL lúc đăng nhập; nếu không, cần chạy lại script sau reboot.
+
+**Theo dõi:** `journalctl --user -u web-bien-codex-worker -f` nếu dùng systemd; hoặc `tail -f ~/.local/share/web-bien-s2-codex/worker.log` nếu dùng nohup. Nhật ký từng nhiệm vụ lưu tại `~/.local/share/web-bien-s2-codex/issue-N.log`.
+
+**Ngừng worker:** `systemctl --user stop web-bien-codex-worker` khi dùng systemd; ở chế độ nohup, tìm PID worker và dừng tiến trình Python tương ứng.
+
+Nhiệm vụ hiện có: https://github.com/tranngochuyc-cyber/web-bien-s2/issues/1 . Sau khi script chạy thành công, worker sẽ tự thấy nhiệm vụ này nếu Issue vẫn đang mở.
+
+## Luồng dự phòng: Codex chạy trên GitHub Actions (API riêng)
+
+Workflow `.github/workflows/codex-issues.yml` hiện chỉ chạy thủ công qua **Actions → Codex Issue Worker → Run workflow** để tránh chạy trùng nhiệm vụ với WSL worker. Nhập Issue number, ví dụ `1`.
+
+Luồng này yêu cầu **OpenAI API key có billing riêng** lưu trong GitHub Actions secret `CODEX_OPENAI_API_KEY`, cùng quyền GitHub Actions viết branch/tạo PR. API usage **không** phải hạn mức Codex trong ChatGPT. Đây là phương án bổ sung, không bắt buộc nếu WSL worker đang hoạt động.
+
+- Tạo API key: https://platform.openai.com/api-keys
+- Đặt secret: https://github.com/tranngochuyc-cyber/web-bien-s2/settings/secrets/actions
+- Quyền Actions: https://github.com/tranngochuyc-cyber/web-bien-s2/settings/actions
+
+## Lưu ý an toàn và giới hạn
+
+- Worker không nhận lệnh từ người lạ; chỉ Issue của `tranngochuyc-cyber` với tiền tố `[Codex]` mới được chạy.
+- Không kết nối self-hosted GitHub Actions runner với máy Windows cá nhân trong repository public.
+- Mọi thay đổi đều nằm trên nhánh riêng/PR cho đến khi được merge. Github Pages chỉ cập nhật sau khi nhánh main đổi.
+- Nếu cả Codex trên máy và worker cùng sửa **cùng một folder** sẽ dễ xung đột; worker sử dụng bản clone riêng để tránh điều này.
+- Trình giám sát quota là cơ chế thử lại từ checkpoint, không phải API chính thức cho biết chính xác thời điểm quota phục hồi. Không thể tiếp tục nếu máy WSL tắt, tài khoản chưa đăng nhập, quyền GitHub hết hiệu lực, hoặc Codex CLI thay đổi cú pháp.
+- Đây là cầu nối nhận task cho Codex; nó không tự giả định rằng Antigravity CLI có sẵn hoặc tự tạo điều phối đa AI từ đầu.
