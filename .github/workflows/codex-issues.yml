@@ -1,0 +1,128 @@
+name: Codex Issue Worker
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing [Codex] issue number
+        required: true
+        type: string
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+jobs:
+  codex:
+    if: >-
+      (github.event_name == 'issues' &&
+       github.event.issue.user.login == 'tranngochuyc-cyber' &&
+       startsWith(github.event.issue.title, '[Codex]')) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.actor == 'tranngochuyc-cyber')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Require API key
+        env:
+          CODEX_KEY: ${{ secrets.CODEX_OPENAI_API_KEY }}
+        run: |
+          if [ -z "$CODEX_KEY" ]; then
+            echo 'Configure GitHub Actions secret CODEX_OPENAI_API_KEY before running Codex.' >&2
+            exit 1
+          fi
+      - name: Validate issue and prepare instructions
+        id: task
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER" > "$RUNNER_TEMP/task.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          issue = json.loads((pathlib.Path(os.environ['RUNNER_TEMP'])/'task.json').read_text())
+          if issue.get('pull_request') or issue.get('user',{}).get('login') != 'tranngochuyc-cyber' or not issue.get('title','').startswith('[Codex]'):
+              raise SystemExit('Only owner-authored [Codex] issues can run')
+          prompt = """Implement the following task in the WEB_BIEN_S2 repository.
+          Preserve the working site, code, assets and responsive behavior.
+          Do not delete/reset the project or edit GitHub workflows, secrets, credentials, or access controls.
+          Do not introduce new noncommercial or unlicensed assets.
+          Implement working code and verify it. Stay inside this checkout.
+          Do not push or commit; the workflow will open a separate PR.
+          
+          ISSUE #{} — {}
+          {}
+          """.format(issue['number'], issue['title'], issue.get('body') or '')
+          pathlib.Path('.codex-task-prompt.md').write_text(prompt,encoding='utf-8')
+          PY
+          echo "number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "branch=codex/issue-$ISSUE_NUMBER-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+      - name: Execute Codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          permission-profile: ':workspace'
+          safety-strategy: drop-sudo
+          prompt-file: .codex-task-prompt.md
+      - name: Validate changes
+        run: |
+          rm -f .codex-task-prompt.md
+          npm ci
+          npm run build
+          npm test --if-present
+      - name: Create change branch
+        id: changes
+        env:
+          BRANCH: ${{ steps.task.outputs.branch }}
+          ISSUE_NUMBER: ${{ steps.task.outputs.number }}
+        run: |
+          set -euo pipefail
+          git add -A
+          git reset -- .codex-task-prompt.md 2>/dev/null || true
+          if git diff --cached --name-only | grep -Eq '^\.github/workflows/'; then
+            echo 'Codex cannot modify GitHub workflows.' >&2
+            exit 1
+          fi
+          if git diff --cached --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$BRANCH"
+          git commit -m "Codex: implement issue #$ISSUE_NUMBER"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+      - name: Push and create pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.task.outputs.number }}
+          BRANCH: ${{ steps.task.outputs.branch }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "Codex: implement issue #$ISSUE_NUMBER" --body "Automatic implementation of #$ISSUE_NUMBER. Build and available tests passed. Review the changes before merging."
+      - name: Report result to issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.task.outputs.number }}
+          CHANGED: ${{ steps.changes.outputs.changed }}
+        run: |
+          if [ "$CHANGED" = 'true' ]; then
+            gh issue comment "$ISSUE_NUMBER" --body 'Codex completed the build and opened a Pull Request. See the Pull Requests tab.'
+          else
+            gh issue comment "$ISSUE_NUMBER" --body 'Codex ran successfully but made no file changes. See Actions for details.'
+          fi
