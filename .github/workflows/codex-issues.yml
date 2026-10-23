@@ -1,7 +1,5 @@
 name: Codex Issue Worker
 on:
-  issues:
-    types: [opened, reopened]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -14,12 +12,7 @@ permissions:
   pull-requests: write
 jobs:
   codex:
-    if: >-
-      (github.event_name == 'issues' &&
-       github.event.issue.user.login == 'tranngochuyc-cyber' &&
-       startsWith(github.event.issue.title, '[Codex]')) ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.actor == 'tranngochuyc-cyber')
+    if: github.actor == 'tranngochuyc-cyber'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
