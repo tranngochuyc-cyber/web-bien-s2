@@ -18,7 +18,8 @@ export function createOcean(canvas, onReady) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b4957);
   scene.fog = new THREE.Fog(0x0b4957, 12, 90);
-  const deepColor = new THREE.Color(0x001d2d);
+  const twilightColor = new THREE.Color(0x072c40);
+  const deepColor = new THREE.Color(0x010c1b);
   const shallowColor = scene.background.clone();
   const discover = document.querySelector('#discover');
   const camera = new THREE.PerspectiveCamera(mobile ? 55 : 48, innerWidth / innerHeight, 0.1, 160);
@@ -100,6 +101,16 @@ export function createOcean(canvas, onReady) {
       markDirty();
     }).catch(error => console.warn('Sunlit reef could not load', error));
   }
+  let deepWorld;
+  let deepPromise;
+  function ensureDeepWorld() {
+    if (deepPromise) return;
+    deepPromise = import('./deep.js').then(({ deepScenes }) => {
+      if (disposed) return;
+      deepWorld = deepScenes(scene, mobile);
+      markDirty();
+    }).catch(error => console.warn('Deep ocean could not load', error));
+  }
 
   const particleCount = mobile ? 420 : 950;
   const dots = new Float32Array(particleCount * 3);
@@ -112,24 +123,6 @@ export function createOcean(canvas, onReady) {
   dotGeometry.setAttribute('position', new THREE.BufferAttribute(dots, 3));
   const plankton = new THREE.Points(dotGeometry, new THREE.PointsMaterial({ color: 0xc9eadb, size: .055, transparent: true, opacity: .45, depthWrite: false }));
   scene.add(plankton);
-
-  // Keep the existing deep-water jellyfish, sharing geometry and material.
-  const jellyMaterial = new THREE.MeshStandardMaterial({ color: 0x79c5d4, emissive: 0x217e9b, emissiveIntensity: .7, transparent: true, opacity: .57, side: THREE.DoubleSide });
-  const bellGeometry = new THREE.SphereGeometry(.72, 20, 12, 0, Math.PI * 2, 0, Math.PI * .55);
-  const jellyfish = [];
-  for (let k = 0; k < (mobile ? 7 : 13); k++) {
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(bellGeometry, jellyMaterial));
-    for (let j = 0; j < 7; j++) {
-      const a = j / 7 * Math.PI * 2;
-      const points = Array.from({ length: 7 }, (_, q) => new THREE.Vector3(Math.cos(a) * .42 + Math.sin(q * 1.5) * .07, -q * .32, Math.sin(a) * .42));
-      g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, .012, 3), jellyMaterial));
-    }
-    g.position.set((Math.random() - .4) * 25, -43 - Math.random() * 14, Math.random() * 18 - 13);
-    g.scale.setScalar(.5 + Math.random() * .65);
-    scene.add(g);
-    jellyfish.push(g);
-  }
 
   const loader = new GLTFLoader();
   const mantaLoadStarted = performance.now();
@@ -191,18 +184,21 @@ export function createOcean(canvas, onReady) {
     }
     const depth = clamp(scrollY / Math.max(1, discoverTop - innerHeight), 0, 1);
     if (depth > .06 && depth < .68) ensureReef();
+    if (depth > .26) ensureDeepWorld();
     const dt = Math.min(clock.getDelta(), .05);
     lastFrame = now; previousScroll = scrollY; dirty = false;
     if (!paused) { elapsed += dt; mixers.forEach(m => m.update(dt)); }
     const surfaceDepth = smooth(clamp(depth / .50, 0, 1));
     const deepDepth = smooth(clamp((depth - .36) / .64, 0, 1));
-    camera.position.set(mix(0, 2.5, surfaceDepth) + Math.sin(depth * Math.PI) * 1.3, mix(0, -52, depth), mix(19, 14, surfaceDepth));
-    cameraTarget.set(mix(2.6, 1, surfaceDepth), camera.position.y - mix(-.4, 1.5, depth), -9 - depth * 2);
+    const twilightArrival = smooth(clamp((depth - .27) / .34, 0, 1));
+    const midnightArrival = smooth(clamp((depth - .61) / .31, 0, 1));
+    camera.position.set(mix(0, 2.5, surfaceDepth) + Math.sin(depth * Math.PI) * 1.3 + twilightArrival * .6 - midnightArrival * .8, mix(0, -52, depth), mix(19, 14, surfaceDepth) - midnightArrival * 1.5);
+    cameraTarget.set(mix(2.6, 1, surfaceDepth) + twilightArrival * .45, camera.position.y - mix(-.4, 1.5, depth), -9 - depth * 2);
     camera.lookAt(cameraTarget);
-    scene.fog.color.copy(shallowColor).lerp(deepColor, deepDepth);
+    scene.fog.color.copy(shallowColor).lerp(twilightColor, twilightArrival).lerp(deepColor, midnightArrival);
     scene.background.copy(scene.fog.color);
-    scene.fog.near = mix(12, 7, deepDepth);
-    scene.fog.far = mix(90, 43, deepDepth);
+    scene.fog.near = mix(12, 6, deepDepth);
+    scene.fog.far = mix(90, 52, deepDepth);
     const lightFalloff = smooth(clamp(depth / .26, 0, 1));
     sun.intensity = mix(3.8, .7, lightFalloff) * (1 - deepDepth * .72);
     ambient.intensity = mix(2.3, .8, lightFalloff) * (1 - deepDepth * .55);
@@ -210,7 +206,7 @@ export function createOcean(canvas, onReady) {
     shaftMaterial.opacity = .015 * (1 - surfaceDepth * .9);
     surface.material.uniforms.uFade.value = 1 - surfaceDepth;
     surface.material.uniforms.uTime.value = elapsed;
-    floor.visible = depth > .12 && depth < .66;
+    floor.visible = depth > .12 && depth < .52;
     floorUniforms.uTime.value = elapsed;
     floorUniforms.uLight.value = 1 - deepDepth;
     if (!paused) {
@@ -219,10 +215,9 @@ export function createOcean(canvas, onReady) {
         group.position.y = origin.y + Math.sin(elapsed * .65 + phase) * .18;
         group.rotation.y += Math.sin(elapsed * .22 + phase) * .0003;
       });
-      jellyfish.forEach((g, i) => { g.rotation.y = elapsed * .035; g.scale.y = 1 + Math.sin(elapsed * 1.2 + i) * .06; });
-
     }
-    animateReef(elapsed, depth > .10 && depth < .66);
+    animateReef(elapsed, depth > .10 && depth < .52);
+    deepWorld?.update(elapsed, depth, paused);
     if (pendingGpuQuery && gl.getQueryParameter(pendingGpuQuery, gl.QUERY_RESULT_AVAILABLE)) {
       if (!gl.getParameter(gpuTimer.GPU_DISJOINT_EXT)) {
         perf.gpuMs.push(gl.getQueryParameter(pendingGpuQuery, gl.QUERY_RESULT) / 1e6);
@@ -248,6 +243,7 @@ export function createOcean(canvas, onReady) {
   }
   function resize() {
     mobile = innerWidth <= 700;
+    deepWorld?.setMobile(mobile);
     camera.aspect = innerWidth / innerHeight;
     camera.fov = innerWidth < 700 ? 55 : 48;
     camera.updateProjectionMatrix();
@@ -272,6 +268,6 @@ export function createOcean(canvas, onReady) {
   queueFrame();
   return {
     setPaused(value) { paused = value; if (paused) stopFrame(); markDirty(); },
-    dispose() { disposed = true; stopFrame(); removeEventListener('resize', resize); removeEventListener('scroll', markDirty); document.removeEventListener('visibilitychange', onVisibilityChange); canvas.removeEventListener('webglcontextlost', onContextLost); canvas.removeEventListener('webglcontextrestored', onContextRestored); if (pendingGpuQuery) gl.deleteQuery(pendingGpuQuery); renderer.dispose(); if (perf) delete window.__oceanPerf; }
+    dispose() { disposed = true; stopFrame(); removeEventListener('resize', resize); removeEventListener('scroll', markDirty); document.removeEventListener('visibilitychange', onVisibilityChange); canvas.removeEventListener('webglcontextlost', onContextLost); canvas.removeEventListener('webglcontextrestored', onContextRestored); if (pendingGpuQuery) gl.deleteQuery(pendingGpuQuery); deepWorld?.dispose(); renderer.dispose(); if (perf) delete window.__oceanPerf; }
   };
 }

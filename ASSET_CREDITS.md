@@ -17,3 +17,9 @@ The following coral scans are by **The Smithsonian Institution** and are release
 The GLBs used here are optimized derivatives published in [web-ocean-3d](https://github.com/2600th/web-ocean-3d/blob/main/ASSET_LICENSES.md): meshes were decimated and Meshopt-compressed; textures were resized and KTX2-encoded. They are placed at different scales and rotations in the scene. Their total download size is about 1.28 MB. CC0 permits use, modification and redistribution without attribution; these credits document the provenance.
 
 The KTX2 texture transcoder in `public/basis/` is **Basis Universal**, licensed under Apache 2.0. Its license text is included at `public/basis/LICENSE.txt`. Three.js loaders and the Meshopt decoder come from the project's installed Three.js package.
+
+## Twilight and Midnight interpretations
+
+The lanternfish-like fish, its school, and the deep-sea anglerfish in `src/deep.js` are modeled procedurally in Three.js. Their skin pattern and lure halo are generated locally at runtime. No third-party mesh, texture, or animation is used for these new subjects. They are artistic interpretations, not taxonomic reference models.
+
+The accompanying educational text is based on [Smithsonian Ocean's lanternfish profile](https://ocean.si.edu/ocean-life/fish/lanternfish) and [MBARI's deep-sea anglerfish profile](https://www.mbari.org/animal/deep-sea-anglerfish/). The displayed depth meter represents a narrative descent; it does not state the depth of an individual modeled animal.

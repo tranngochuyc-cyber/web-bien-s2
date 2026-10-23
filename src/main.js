@@ -10,3 +10,22 @@ function draw(){grid.replaceChildren();const matches=data.filter(x=>(filter==='a
 const status=document.querySelector('#status');function setStatus(text){status.textContent=text;status.hidden=!text;}let ocean;const reduced=matchMedia('(prefers-reduced-motion: reduce)');let paused=reduced.matches;const motion=document.querySelector('#motion');function syncMotion(){motion.setAttribute('aria-pressed',String(paused));motion.textContent=paused?'Tiếp tục chuyển động':'Tạm dừng chuyển động';ocean?.setPaused(paused);}motion.onclick=()=>{paused=!paused;syncMotion();};reduced.addEventListener('change',e=>{paused=e.matches;syncMotion();});syncMotion();
 import('./ocean.js').then(({createOcean})=>{ocean=createOcean(document.querySelector('#ocean'),setStatus);syncMotion();}).catch(error=>{console.error(error);setStatus('Thiết bị chưa mở được đồ họa 3D. Bạn vẫn có thể đọc và khám phá toàn bộ nội dung.');document.body.classList.add('fallback');});
 const stops=[...document.querySelectorAll('.depth-nav a')];let ticking=false;function update(){const end=document.querySelector('#discover').offsetTop-innerHeight,p=Math.min(1,Math.max(0,scrollY/Math.max(1,end)));document.querySelector('#depth-readout').textContent=String(Math.round(p < .34 ? p/.34*200 : p < .69 ? 200+(p-.34)/.35*800 : 1000+(p-.69)/.31*1400)).padStart(4,'0')+' m';let current=0;stops.forEach((a,i)=>{if(document.querySelector(a.hash).getBoundingClientRect().top<innerHeight*.55)current=i;});stops.forEach((a,i)=>a.setAttribute('aria-current',String(i===current)));document.querySelector('.depth-nav').style.opacity=scrollY>end+innerHeight*.4?'0':'1';document.querySelector('.depth-nav').style.pointerEvents=scrollY>end+innerHeight*.4?'none':'auto';ticking=false;}addEventListener('scroll',()=>{if(!ticking){requestAnimationFrame(update);ticking=true;}},{passive:true});addEventListener('resize',update);update();
+
+const encounters = {
+  lanternfish: {
+    title: 'Cá đèn lồng', latin: 'Họ Myctophidae',
+    description: 'Nhiều cá đèn lồng sống ở tầng chạng vạng, nơi ánh sáng mặt trời chỉ còn rất yếu. Các cơ quan phát sáng (photophore) dọc bụng giúp chúng hòa ánh sáng từ phía trên; nhiều loài di cư lên gần mặt nước vào ban đêm.',
+    source: 'https://ocean.si.edu/ocean-life/fish/lanternfish', sourceName: 'Smithsonian Ocean'
+  },
+  anglerfish: {
+    title: 'Cá cần câu biển sâu', latin: 'Bộ Lophiiformes',
+    description: 'Nhiều cá cần câu biển sâu dùng một phần tia vây lưng biến đổi thành cần câu với mồi sáng để thu hút con mồi. MBARI ghi nhận nhóm này ở khoảng 300–4.000 m; hình dạng và nơi sống khác nhau giữa các loài.',
+    source: 'https://www.mbari.org/animal/deep-sea-anglerfish/', sourceName: 'MBARI'
+  }
+};
+document.querySelectorAll('[data-explore]').forEach(button => button.addEventListener('click', () => {
+  const item = encounters[button.dataset.explore];
+  if (!item) return;
+  document.querySelector('#detail-content').innerHTML = `<div class="chapter">KHÁM PHÁ TẦNG NƯỚC / MÔ HÌNH MINH HỌA</div><h2>${item.title}</h2><p><i>${item.latin}</i></p><p>${item.description}</p><p>Mô hình 3D diễn giải nghệ thuật, không dùng để nhận dạng loài hoặc suy ra độ sâu của cá thể.</p><a href="${item.source}" target="_blank" rel="noopener">Đọc tại ${item.sourceName} ↗</a>`;
+  dialog.showModal();
+}));
