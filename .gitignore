@@ -5,3 +5,4 @@ dist/
 PROGRESS.md
 .codex/
 .agents/
+.playwright-mcp/
